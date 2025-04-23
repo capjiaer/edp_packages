@@ -1,0 +1,34 @@
+pv_calibre:
+  dependency:
+    FP_MODE:
+      - ipmerge:
+          out: ipmerge.pass
+          cmd: calibre_ipmerge.tcl
+      - dummy:
+          in: ipmerge.pass
+          out: dummy.pass
+          cmd: calibre_dummy.tcl
+      - colorrtg:
+          in: dummy.pass
+          out: colorrtg.pass
+          cmd: calibre_drc.tcl
+      - dfm:
+          in: dummy.pass
+          out: dfm.pass
+          cmd: calibre_dfm.tcl
+      - drc:
+          in: dummy.pass
+          out: drc.pass
+          cmd: calibre_drc.tcl
+      - flt:
+          in: dummy.pass
+          out: flt.pass
+          cmd: calibre_flt.tcl
+      - lvs:
+          in: dummy.pass
+          out: lvs.pass
+          cmd: calibre_lvs.tcl
+      - perc:
+          - perctopo:
+              in: ipmerge.pass
+              cmd: calibre_perctopo.tcl
