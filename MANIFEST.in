@@ -1,0 +1,7 @@
+include LICENSE
+include README.md
+include MANIFEST.in
+include setup.py
+recursive-include flowkit *.py
+recursive-include flowkit/tests *.py
+recursive-include docs *.md *.rst *.txt

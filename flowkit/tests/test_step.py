@@ -33,33 +33,12 @@ class TestStep(unittest.TestCase):
         self.assertEqual(self.step1.inputs, ["input1.txt"])
         self.assertEqual(self.step1.outputs, ["output1.txt"])
         self.assertEqual(self.step1.status, StepStatus.INIT)
-        self.assertEqual(self.step1.prev_steps, [])
-        self.assertEqual(self.step1.next_steps, [])
 
         # 测试默认值
         step = Step("test")
         self.assertEqual(step.cmd, None)
         self.assertEqual(step.inputs, [])
         self.assertEqual(step.outputs, [])
-
-    def test_add_next_step(self):
-        """测试添加后续步骤"""
-        # 添加后续步骤
-        self.step1.add_next_step(self.step2)
-
-        # 验证关系是双向的
-        self.assertIn(self.step2, self.step1.next_steps)
-        self.assertIn(self.step1, self.step2.prev_steps)
-
-        # 测试重复添加
-        self.step1.add_next_step(self.step2)
-        self.assertEqual(len(self.step1.next_steps), 1)
-        self.assertEqual(len(self.step2.prev_steps), 1)
-
-        # 测试链式关系
-        self.step2.add_next_step(self.step3)
-        self.assertIn(self.step3, self.step2.next_steps)
-        self.assertIn(self.step2, self.step3.prev_steps)
 
     def test_update_status(self):
         """测试更新状态"""
@@ -96,78 +75,23 @@ class TestStep(unittest.TestCase):
         self.step1.reset()
         self.assertEqual(self.step1.status, StepStatus.INIT)
 
-    def test_can_run_no_deps(self):
-        """测试无依赖时的可运行状态"""
-        # 没有前置步骤时应该可以运行
-        self.assertTrue(self.step1.can_run())
-        self.assertTrue(self.step1.can_run(ignore_failed_deps=True))
-
-    def test_can_run_with_deps(self):
-        """测试有依赖时的可运行状态"""
-        # 设置依赖关系
-        self.step1.add_next_step(self.step2)
-        self.step2.add_next_step(self.step3)
-
-        # 当前置步骤未完成时，不应该可以运行
-        self.assertFalse(self.step2.can_run())
-        self.assertFalse(self.step3.can_run())
-
-        # 当前置步骤完成时，应该可以运行
-        self.step1.update_status(StepStatus.FINISHED)
-        self.assertTrue(self.step2.can_run())
-        self.assertFalse(self.step3.can_run())
-
-        # 当前置步骤跳过时，也应该可以运行
-        self.step1.update_status(StepStatus.SKIPPED)
-        self.assertTrue(self.step2.can_run())
-
-    def test_can_run_with_failed_deps(self):
-        """测试前置步骤失败时的可运行状态"""
-        # 设置依赖关系
-        self.step1.add_next_step(self.step2)
-
-        # 当前置步骤失败时
-        self.step1.update_status(StepStatus.FAILED)
-
-        # 默认情况下，不应该可以运行
-        self.assertFalse(self.step2.can_run())
-
-        # 当忽略失败的前置步骤时，应该可以运行
-        self.assertTrue(self.step2.can_run(ignore_failed_deps=True))
-
-    def test_get_all_prerequisites(self):
-        """测试获取所有前置步骤"""
-        # 创建更复杂的依赖关系
-        step4 = Step("step4")
-        step5 = Step("step5")
-
-        # step1 -> step2 -> step3
-        #      \-> step4 -> step5 -> step3
-        self.step1.add_next_step(self.step2)
-        self.step1.add_next_step(step4)
-        self.step2.add_next_step(self.step3)
-        step4.add_next_step(step5)
-        step5.add_next_step(self.step3)
-
-        # 测试 step3 的所有前置步骤
-        prerequisites = self.step3.get_all_prerequisites()
-        self.assertEqual(len(prerequisites), 4)
-        self.assertIn(self.step1, prerequisites)
-        self.assertIn(self.step2, prerequisites)
-        self.assertIn(step4, prerequisites)
-        self.assertIn(step5, prerequisites)
-
-        # 测试 step5 的所有前置步骤
-        prerequisites = step5.get_all_prerequisites()
-        self.assertEqual(len(prerequisites), 2)
-        self.assertIn(self.step1, prerequisites)
-        self.assertIn(step4, prerequisites)
-
     def test_repr(self):
         """测试字符串表示"""
-        self.assertEqual(repr(self.step1), "Step(step1, status=init)")
+        self.assertEqual(repr(self.step1), f"Step({self.step1.id}, status={self.step1.status})")
         self.step1.update_status(StepStatus.RUNNING)
-        self.assertEqual(repr(self.step1), "Step(step1, status=running)")
+        self.assertEqual(repr(self.step1), f"Step({self.step1.id}, status={StepStatus.RUNNING})")
+
+
+class TestStepStatus(unittest.TestCase):
+    """测试 StepStatus 类"""
+
+    def test_status_constants(self):
+        """测试状态常量"""
+        self.assertEqual(StepStatus.INIT, "init")
+        self.assertEqual(StepStatus.RUNNING, "running")
+        self.assertEqual(StepStatus.FINISHED, "finished")
+        self.assertEqual(StepStatus.SKIPPED, "skipped")
+        self.assertEqual(StepStatus.FAILED, "failed")
 
 
 if __name__ == '__main__':

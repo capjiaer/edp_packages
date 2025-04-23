@@ -157,49 +157,170 @@ class ICCommandExecutor:
         """
         # 获取基本信息
         step_name = step.name
-        cmd = step.cmd
+        cmd_file = step.cmd  # 命令文件名，如 "floorplan.tcl"
 
-        if not cmd:
-            logger.warning(f"步骤 {step_name} 没有指定命令，跳过执行")
+        if not cmd_file:
+            logger.warning(f"步骤 {step_name} 没有指定命令文件，跳过执行")
             return True
 
         # 获取步骤的各种目录
         dirs = self._get_step_directories(step)
         work_dir = dirs["runs"]  # 工作目录设置为runs目录
         log_dir = dirs["logs"]
-
-        # 获取配置变量
-        timeout = get_flow_var(step, "timeout", merged_var, default=3600)
-        use_lsf = get_flow_var(step, "use_lsf", merged_var, default=False)
-        wait_lsf = get_flow_var(step, "wait_lsf", merged_var, default=True)
-
-        # 准备日志文件
+        cmd_path = os.path.join(dirs["cmds"], cmd_file)
         log_file = os.path.join(log_dir, f"{step_name.replace('.', '_')}.log")
+
+        # 准备命令（决定使用本地还是LSF）
+        cmd, use_lsf = self._prepare_command(step, merged_var, cmd_file, log_file, dirs)
 
         # 记录执行信息
         logger.info(f"执行步骤: {step_name}")
+        logger.info(f"命令文件: {cmd_file}")
+        logger.info(f"完整命令: {cmd}")
         logger.info(f"工作目录: {work_dir}")
         logger.info(f"日志文件: {log_file}")
-        logger.info(f"命令: {cmd}")
 
         # 演示模式
         if self.dry_run:
             logger.info(f"[演示模式] 步骤 {step_name} 将在 {work_dir} 执行命令: {cmd}")
             return True
 
-        # 替换命令中的目录变量
-        cmd = self._replace_dir_variables(cmd, dirs)
-
         try:
             if use_lsf:
+                wait_lsf = get_flow_var(step, "wait_lsf", merged_var, default=True)
                 return self._run_lsf(step, cmd, log_file, work_dir, merged_var, wait_lsf)
             else:
+                timeout = get_flow_var(step, "timeout", merged_var, default=None)  # 默认为None，表示没有超时限制
                 return self._run_local(step, cmd, log_file, work_dir, timeout)
         except Exception as e:
             logger.error(f"步骤 {step_name} 执行出错: {str(e)}")
             return False
 
-    def _run_local(self, step, cmd, log_file, work_dir, timeout):
+    def _prepare_command(self, step, merged_var, cmd_file, log_file, dirs):
+        """
+        准备执行命令，决定使用本地执行还是LSF执行
+
+        Args:
+            step: 步骤对象
+            merged_var (dict): 合并后的配置字典
+            cmd_file (str): 命令文件名
+            log_file (str): 日志文件路径
+            dirs (dict): 目录字典
+
+        Returns:
+            tuple: (命令字符串, 是否使用LSF)
+        """
+        # 检查是否使用LSF
+        use_lsf = get_flow_var(step, "lsf", merged_var, default=0)
+
+        if use_lsf:
+            # 构建LSF命令
+            cmd = self._build_lsf_command(step, merged_var, cmd_file, log_file, dirs)
+            if not cmd:  # 如果LSF命令构建失败，回退到本地执行
+                logger.warning(f"步骤 {step.name} LSF配置无效，使用本地执行")
+                use_lsf = False
+                cmd = self._build_local_command(step, merged_var, cmd_file, dirs)
+        else:
+            # 构建本地命令
+            cmd = self._build_local_command(step, merged_var, cmd_file, dirs)
+
+        # 替换命令中的目录变量
+        cmd = self._replace_dir_variables(cmd, dirs)
+
+        return cmd, use_lsf
+
+    def _build_local_command(self, step, merged_var, cmd_file, dirs):
+        """
+        构建本地执行的命令
+
+        Args:
+            step: 步骤对象
+            merged_var (dict): 合并后的配置字典
+            cmd_file (str): 命令文件名
+            dirs (dict): 目录字典
+
+        Returns:
+            str: 构建的本地命令
+        """
+        # 获取工具选项
+        tool_opt = get_flow_var(step, "tool_opt", merged_var, default="")
+
+        # 构建命令路径
+        cmd_path = os.path.join("${CMDS_DIR}", cmd_file)
+
+        # 构建完整命令
+        if tool_opt:
+            cmd = f"{tool_opt} {cmd_path}"
+        else:
+            cmd = cmd_path
+
+        return cmd
+
+    def _build_lsf_command(self, step, merged_var, cmd_file, log_file, dirs):
+        """
+        构建LSF提交命令
+
+        Args:
+            step: 步骤对象
+            merged_var (dict): 合并后的配置字典
+            cmd_file (str): 命令文件名
+            log_file (str): 日志文件路径
+            dirs (dict): 目录字典
+
+        Returns:
+            str: 构建的LSF命令，如果配置无效则返回None
+        """
+        flow_name, sub_step_name = self._parse_step_name(step.name)
+
+        # 基本LSF命令
+        queue = get_flow_var(step, "queue", merged_var, default="normal")
+        lsf_str = f"bsub -q {queue}"
+
+        # 作业名
+        job_str = f"-J {step.name}"
+
+        # 资源字符串
+        cpu_num = get_flow_var(step, "cpu_num", merged_var, default=1)
+        memory = get_flow_var(step, "memory", merged_var, default=4000)
+        span = get_flow_var(step, "span", merged_var, default=1)
+        resource_str = f'-n {cpu_num} -R "rusage[mem={memory}] span[hosts={span}]"'
+
+        # 日志重定向
+        log_str = f"-o {log_file}"
+
+        # 工具选项
+        tool_opt = get_flow_var(step, "tool_opt", merged_var, default="")
+
+        # 预处理命令
+        pre_lsf = get_flow_var(step, "pre_lsf", merged_var, default="")
+
+        # 构建本地命令（作为LSF的执行命令）
+        local_cmd = self._build_local_command(step, merged_var, cmd_file, dirs)
+
+        # 构建完整的LSF命令
+        components = []
+        if pre_lsf:
+            components.append(pre_lsf)
+        components.append(lsf_str)
+        components.append(job_str)
+        components.append(resource_str)
+        components.append(log_str)
+
+        # 组合LSF命令
+        lsf_cmd = " ".join(components)
+
+        # 获取工作目录
+        work_dir = dirs["runs"]
+
+        # 如果命令包含重定向或管道，需要用引号括起来
+        if any(c in local_cmd for c in "|><&"):
+            lsf_cmd += f" 'cd {work_dir} && {local_cmd}'"
+        else:
+            lsf_cmd += f" cd {work_dir} && {local_cmd}"
+
+        return lsf_cmd
+
+    def _run_local(self, step, cmd, log_file, work_dir, timeout=None):
         """
         在本地执行命令
 
@@ -208,12 +329,16 @@ class ICCommandExecutor:
             cmd (str): 要执行的命令
             log_file (str): 日志文件路径
             work_dir (str): 工作目录
-            timeout (int): 超时时间（秒）
+            timeout (int, optional): 超时时间（秒），如果为None则没有超时限制
 
         Returns:
             bool: 执行是否成功
         """
-        logger.info(f"本地执行步骤 {step.name}, 工作目录: {work_dir}, 超时: {timeout}秒")
+        logger.info(f"本地执行步骤 {step.name}, 工作目录: {work_dir}")
+        if timeout:
+            logger.info(f"设置超时: {timeout}秒")
+        else:
+            logger.info("没有设置超时限制")
 
         try:
             # 打开日志文件
@@ -224,7 +349,7 @@ class ICCommandExecutor:
                     shell=True,
                     stdout=f,
                     stderr=subprocess.STDOUT,
-                    timeout=timeout,
+                    timeout=timeout,  # 如果为None，则没有超时限制
                     cwd=work_dir
                 )
 
@@ -255,28 +380,13 @@ class ICCommandExecutor:
         Returns:
             bool: 执行是否成功
         """
-        # 获取LSF配置
-        lsf_queue = get_flow_var(step, "lsf_queue", merged_var, default="normal")
-        lsf_memory = get_flow_var(step, "lsf_memory", merged_var, default="4G")
-        lsf_cores = get_flow_var(step, "lsf_cores", merged_var, default=1)
-        lsf_options = get_flow_var(step, "lsf_options", merged_var, default="-Ip")
-
-        # 构建LSF命令
-        lsf_cmd = f"bsub -q {lsf_queue} -M {lsf_memory} -n {lsf_cores} -o {log_file} {lsf_options} "
-
-        # 如果命令包含重定向或管道，需要用引号括起来
-        if any(c in cmd for c in "|><&"):
-            lsf_cmd += f"'cd {work_dir} && {cmd}'"
-        else:
-            lsf_cmd += f"cd {work_dir} && {cmd}"
-
-        logger.info(f"LSF提交步骤 {step.name}, 工作目录: {work_dir}, 队列: {lsf_queue}, 内存: {lsf_memory}, 核心数: {lsf_cores}")
-        logger.info(f"LSF命令: {lsf_cmd}")
+        logger.info(f"LSF提交步骤 {step.name}, 工作目录: {work_dir}")
+        logger.info(f"LSF命令: {cmd}")
 
         try:
             # 提交LSF作业
             result = subprocess.run(
-                lsf_cmd,
+                cmd,
                 shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -478,7 +588,7 @@ class ICCommandExecutor:
         cmd = license_check_cmds[tool_name.lower()]
         logger.info(f"检查 {tool_name} 许可证")
 
-        success, output = self.get_cmd_output(cmd, timeout)
+        success, output = self.get_cmd_output(cmd, timeout=timeout)
         if not success:
             logger.error(f"检查 {tool_name} 许可证时出错")
             return False

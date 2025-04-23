@@ -263,53 +263,54 @@ def execute_all_steps(graph, execute_func=None, merged_var=None, max_workers=Non
 
 def get_flow_var(step, var_name, merged_var, default=None):
     """
-    按优先级在嵌套字典中查找变量值：
-    1. 特定步骤的变量: merged_var[flow_name][step_name][var_name]
-    2. 流程级变量: merged_var[flow_name][var_name]
-    3. 全局变量: merged_var[var_name]
-    4. 默认值
+    获取配置变量，按照以下顺序查找：
+    1. 步骤级别：flow_name.step_name.var_name
+    2. 工具默认级别：flow_name.default.var_name
+    3. 全局级别：edp.var_name
+    4. 提供的默认值
 
     Args:
-        step: 步骤对象
+        step: 步骤对象或步骤名称
         var_name: 变量名称
         merged_var: 合并后的配置字典
         default: 默认值
 
     Returns:
-        找到的变量值或默认值
+        变量值
     """
-    # 解析流程名称和步骤名称
-    if "." in step.name:
-        flow_name, step_name = step.name.split(".", 1)
+    # 获取流程名称和步骤名称
+    if isinstance(step, str):
+        step_name = step
     else:
-        flow_name = ""
         step_name = step.name
 
-    # 尝试获取特定步骤的变量
+    flow_name = step_name.split('.')[0] if '.' in step_name else step_name
+    sub_step_name = step_name.split('.')[1] if '.' in step_name else ""
+
+    # 1. 查找步骤级别配置
     try:
-        if flow_name and flow_name in merged_var and isinstance(merged_var[flow_name], dict):
-            if step_name and step_name in merged_var[flow_name] and isinstance(merged_var[flow_name][step_name], dict):
-                if var_name in merged_var[flow_name][step_name]:
-                    return merged_var[flow_name][step_name][var_name]
+        if flow_name in merged_var and sub_step_name in merged_var[flow_name]:
+            if var_name in merged_var[flow_name][sub_step_name]:
+                return merged_var[flow_name][sub_step_name][var_name]
     except (KeyError, TypeError):
         pass
 
-    # 尝试获取流程级变量
+    # 2. 查找工具默认级别配置
     try:
-        if flow_name and flow_name in merged_var and isinstance(merged_var[flow_name], dict):
-            if var_name in merged_var[flow_name]:
-                return merged_var[flow_name][var_name]
+        if flow_name in merged_var and "default" in merged_var[flow_name]:
+            if var_name in merged_var[flow_name]["default"]:
+                return merged_var[flow_name]["default"][var_name]
     except (KeyError, TypeError):
         pass
 
-    # 尝试获取全局变量
+    # 3. 查找全局级别配置
     try:
-        if var_name in merged_var:
-            return merged_var[var_name]
+        if "edp" in merged_var and var_name in merged_var["edp"]:
+            return merged_var["edp"][var_name]
     except (KeyError, TypeError):
         pass
 
-    # 返回默认值
+    # 4. 返回默认值
     return default
 
 

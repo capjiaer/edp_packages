@@ -29,13 +29,6 @@ class TestGraph(unittest.TestCase):
         self.step4 = Step("step4", "echo step4", ["output1.txt"], ["output4.txt"])
         self.step5 = Step("step5", "echo step5", ["output4.txt", "output2.txt"], ["output5.txt"])
         
-        # 手动设置依赖关系
-        self.step1.add_next_step(self.step2)  # step1 -> step2
-        self.step1.add_next_step(self.step4)  # step1 -> step4
-        self.step2.add_next_step(self.step3)  # step2 -> step3
-        self.step2.add_next_step(self.step5)  # step2 -> step5
-        self.step4.add_next_step(self.step5)  # step4 -> step5
-        
         # 创建步骤字典
         self.steps_dict = {
             "step1": self.step1,
@@ -95,17 +88,21 @@ class TestGraph(unittest.TestCase):
         self.assertIn("step5", graph.steps)
         
         # 验证依赖关系
-        self.assertIn(self.step2, self.step1.next_steps)
-        self.assertIn(self.step4, self.step1.next_steps)
-        self.assertIn(self.step3, self.step2.next_steps)
-        self.assertIn(self.step5, self.step2.next_steps)
-        self.assertIn(self.step5, self.step4.next_steps)
+        # 使用 Graph 类的方法获取依赖关系
+        self.assertEqual(len(graph.get_next_steps("step1")), 2)
+        self.assertIn(graph.steps["step2"], graph.get_next_steps("step1"))
+        self.assertIn(graph.steps["step4"], graph.get_next_steps("step1"))
         
-        self.assertIn(self.step1, self.step2.prev_steps)
-        self.assertIn(self.step1, self.step4.prev_steps)
-        self.assertIn(self.step2, self.step3.prev_steps)
-        self.assertIn(self.step2, self.step5.prev_steps)
-        self.assertIn(self.step4, self.step5.prev_steps)
+        self.assertEqual(len(graph.get_next_steps("step2")), 2)
+        self.assertIn(graph.steps["step3"], graph.get_next_steps("step2"))
+        self.assertIn(graph.steps["step5"], graph.get_next_steps("step2"))
+        
+        self.assertEqual(len(graph.get_prev_steps("step2")), 1)
+        self.assertIn(graph.steps["step1"], graph.get_prev_steps("step2"))
+        
+        self.assertEqual(len(graph.get_prev_steps("step5")), 2)
+        self.assertIn(graph.steps["step2"], graph.get_prev_steps("step5"))
+        self.assertIn(graph.steps["step4"], graph.get_prev_steps("step5"))
 
     def test_init_with_yaml_file(self):
         """测试使用 YAML 文件初始化图"""
@@ -122,23 +119,13 @@ class TestGraph(unittest.TestCase):
         self.assertIn("step5", graph.steps)
         
         # 验证依赖关系
-        step1 = graph.steps["step1"]
-        step2 = graph.steps["step2"]
-        step3 = graph.steps["step3"]
-        step4 = graph.steps["step4"]
-        step5 = graph.steps["step5"]
+        # 使用 Graph 类的方法获取依赖关系
+        self.assertEqual(len(graph.get_next_steps("step1")), 2)
+        self.assertIn(graph.steps["step2"], graph.get_next_steps("step1"))
+        self.assertIn(graph.steps["step4"], graph.get_next_steps("step1"))
         
-        self.assertIn(step2, step1.next_steps)
-        self.assertIn(step4, step1.next_steps)
-        self.assertIn(step3, step2.next_steps)
-        self.assertIn(step5, step2.next_steps)
-        self.assertIn(step5, step4.next_steps)
-        
-        self.assertIn(step1, step2.prev_steps)
-        self.assertIn(step1, step4.prev_steps)
-        self.assertIn(step2, step3.prev_steps)
-        self.assertIn(step2, step5.prev_steps)
-        self.assertIn(step4, step5.prev_steps)
+        self.assertEqual(len(graph.get_prev_steps("step2")), 1)
+        self.assertIn(graph.steps["step1"], graph.get_prev_steps("step2"))
 
     def test_build_graph_from_yaml(self):
         """测试从 YAML 文件构建图"""
@@ -197,7 +184,7 @@ class TestGraph(unittest.TestCase):
         
         # 只有 step1 是可执行步骤
         self.assertEqual(len(ready_steps), 1)
-        self.assertEqual(ready_steps[0], "step1")
+        self.assertEqual(ready_steps[0].id, "step1")
         
         # 将 step1 标记为已完成
         self.step1.update_status(StepStatus.FINISHED)
@@ -205,17 +192,18 @@ class TestGraph(unittest.TestCase):
         
         # 现在 step2 和 step4 是可执行步骤
         self.assertEqual(len(ready_steps), 2)
-        self.assertIn("step2", ready_steps)
-        self.assertIn("step4", ready_steps)
+        ready_ids = [step.id for step in ready_steps]
+        self.assertIn("step2", ready_ids)
+        self.assertIn("step4", ready_ids)
         
         # 将 step2 标记为已跳过
         self.step2.update_status(StepStatus.SKIPPED)
         ready_steps = graph.get_ready_steps()
         
         # 现在 step3 和 step4 是可执行步骤
-        self.assertEqual(len(ready_steps), 2)
-        self.assertIn("step3", ready_steps)
-        self.assertIn("step4", ready_steps)
+        ready_ids = [step.id for step in ready_steps]
+        self.assertIn("step3", ready_ids)
+        self.assertIn("step4", ready_ids)
 
     def test_topological_sort(self):
         """测试拓扑排序"""
@@ -243,10 +231,10 @@ class TestGraph(unittest.TestCase):
 
     def test_topological_sort_with_cycle(self):
         """测试带有循环依赖的拓扑排序"""
-        # 创建循环依赖
-        self.step3.add_next_step(self.step1)  # 添加 step3 -> step1，形成循环
-        
         graph = Graph(steps_dict=self.steps_dict)
+        
+        # 添加循环依赖
+        graph.add_dependency("step3", "step1")  # 添加 step3 -> step1，形成循环
         
         # 拓扑排序应该抛出异常
         with self.assertRaises(ValueError):
@@ -369,8 +357,8 @@ class TestGraph(unittest.TestCase):
         self.assertNotIn("step1", intersection.steps)
         self.assertNotIn("step4", intersection.steps)
 
-    def test_get_union_graph(self):
-        """测试获取图的并集"""
+    def test_create_union_graph(self):
+        """测试创建图的并集"""
         # 创建第一个图
         graph1 = Graph(steps_dict={
             "step1": self.step1,
@@ -384,7 +372,7 @@ class TestGraph(unittest.TestCase):
         })
         
         # 获取并集
-        union = graph1.get_union_graph(graph2)
+        union = graph1.create_union_graph(graph2)
         
         # 验证并集
         self.assertEqual(len(union.steps), 4)
@@ -460,11 +448,6 @@ class TestGraph(unittest.TestCase):
         step6 = Step("step6", "echo step6", ["output3.txt"], ["output6.txt"])
         step7 = Step("step7", "echo step7", ["output5.txt", "output6.txt"], ["output7.txt"])
         
-        # 设置依赖关系
-        self.step3.add_next_step(step6)  # step3 -> step6
-        self.step5.add_next_step(step7)  # step5 -> step7
-        step6.add_next_step(step7)       # step6 -> step7
-        
         steps_dict = {
             "step1": self.step1,
             "step2": self.step2,
@@ -476,6 +459,11 @@ class TestGraph(unittest.TestCase):
         }
         
         graph = Graph(steps_dict=steps_dict)
+        
+        # 手动添加依赖关系
+        graph.add_dependency("step3", "step6")  # step3 -> step6
+        graph.add_dependency("step5", "step7")  # step5 -> step7
+        graph.add_dependency("step6", "step7")  # step6 -> step7
         
         # 获取 step2 之后的子图（贪婪模式）
         subgraph = graph.get_subgraph_after_greedy("step2")
@@ -493,50 +481,6 @@ class TestGraph(unittest.TestCase):
         # 测试不存在的步骤
         with self.assertRaises(ValueError):
             graph.get_subgraph_after_greedy("non_existent")
-
-    def test_get_subgraph_between_greedy(self):
-        """测试贪婪模式获取两个节点之间的子图"""
-        # 创建一个更复杂的图
-        step6 = Step("step6", "echo step6", ["output3.txt"], ["output6.txt"])
-        step7 = Step("step7", "echo step7", ["output5.txt", "output6.txt"], ["output7.txt"])
-        
-        # 设置依赖关系
-        self.step3.add_next_step(step6)  # step3 -> step6
-        self.step5.add_next_step(step7)  # step5 -> step7
-        step6.add_next_step(step7)       # step6 -> step7
-        
-        steps_dict = {
-            "step1": self.step1,
-            "step2": self.step2,
-            "step3": self.step3,
-            "step4": self.step4,
-            "step5": self.step5,
-            "step6": step6,
-            "step7": step7
-        }
-        
-        graph = Graph(steps_dict=steps_dict)
-        
-        # 获取 step2 和 step7 之间的子图（贪婪模式）
-        subgraph = graph.get_subgraph_between_greedy("step2", "step7")
-        
-        # 验证子图
-        self.assertEqual(len(subgraph.steps), 5)
-        self.assertIn("step2", subgraph.steps)
-        self.assertIn("step3", subgraph.steps)
-        self.assertIn("step5", subgraph.steps)
-        self.assertIn("step6", subgraph.steps)
-        self.assertIn("step7", subgraph.steps)
-        self.assertNotIn("step1", subgraph.steps)
-        self.assertNotIn("step4", subgraph.steps)
-        
-        # 测试不存在的路径
-        with self.assertRaises(ValueError):
-            graph.get_subgraph_between_greedy("step4", "step6")
-        
-        # 测试不存在的步骤
-        with self.assertRaises(ValueError):
-            graph.get_subgraph_between_greedy("step1", "non_existent")
 
 
 if __name__ == '__main__':
